@@ -1,0 +1,6 @@
+flask
+python-telegram-bot==2.8.7
+requests
+pytz
+python-dateutil
+redis
