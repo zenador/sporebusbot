@@ -43,7 +43,7 @@ KEY_REMIND = '_remind'
 KEY_TRACK = '_track'
 KEY_DAILY_LOG = '_dailylog'
 KEY_QUEUE = '_queue'
-MAX_COUNT = 3
+MAX_COUNT = 3 # does not include initial update, only follow-ups
 MAX_TRACKING_COUNT = 8
 MAX_DAILY_LOG = 100
 
@@ -494,6 +494,7 @@ def replyNextBus(chat_id, text, count, fromQ):
 
     response = getNextBuses(busStopNo, routeNo)
     waitSecs = -1
+    reply = ""
     if type(response) is tuple:
         responseStatus = response[0]
         reply = response[1]
@@ -524,25 +525,34 @@ def replyNextBus(chat_id, text, count, fromQ):
                             waitMins = remTime - interval
                         waitSecs = (waitMins)*60
 
+    shouldSendMsg = False
     if (not isTrackingSilent) or (waitSecs < 60) or (count > MAX_TRACKING_COUNT) or (count == 0):
-        sendMsg(chat_id, reply)
+        shouldSendMsg = True
     count += 1
 
     if maxCount > MAX_COUNT:
         maxCount = MAX_COUNT
         if (count == 1) and (waitSecs >= 60):
-            sendMsg(chat_id, 'Don\'t be insane, that\'s way too many times. Will only update you '+str(MAX_COUNT)+' more times')
+            shouldSendMsg = True
+            reply += '\nDon\'t be insane, that\'s way too many times. Will only update you '+str(MAX_COUNT)+' more times'
 
     if isTracking:
         maxCount = MAX_TRACKING_COUNT
     
-    if (count <= maxCount) and (waitSecs != -1):
+    if count == maxCount + 1:
+        if shouldSendMsg and reply:
+            reply = '_Final update_\n' + reply
+    elif (count <= maxCount) and (waitSecs != -1):
         if waitSecs < 60:
-            sendMsg(chat_id, 'Won\'t send an update as it\'s too soon (within 1 minute)')
+            if shouldSendMsg and reply:
+                reply = '_Final update_\n' + reply
         else:
             t = Timer(waitSecs, replyNextBus, [chat_id, text, count, True])
             t.start()
             addToQueue(chat_id, text)
+
+    if shouldSendMsg and reply:
+        sendMsg(chat_id, reply)
         
 def sendMsg(chat_id, text):
     bot.sendMessage(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN)

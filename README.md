@@ -8,4 +8,5 @@ Try it out on Telegram: [@SporeBusBot](http://telegram.me/SporeBusBot)
 
 ## Instructions
 
-Put in your Telegram token, app URL, [LTA API credentials](http://www.mytransport.sg/content/mytransport/home/dataMall.html) and Redis details ([OpenShift has a partner provider](https://blog.openshift.com/how-to-use-redis-on-openshift-from-your-ruby-application/)) in flaskapp.cfg, then host it on OpenShift.
+1. Put in your Telegram token, app URL, [LTA API credentials](http://www.mytransport.sg/content/mytransport/home/dataMall.html) and Redis details ([OpenShift has a partner provider](https://blog.openshift.com/how-to-use-redis-on-openshift-from-your-ruby-application/), or you can use [Redis Cloud](https://redislabs.com/redis-cloud) directly) in flaskapp.cfg, then host it on OpenShift with the cartridges Python 2.7 and Cron 1.4.
+2. When setting up your Telegram bot for the first time, visit the following URL (based on your values in flaskapp.cfg) in your browser to set up your webhook: APP_URL/TOKEN/set_webhook
