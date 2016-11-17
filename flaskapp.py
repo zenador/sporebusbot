@@ -51,7 +51,7 @@ MAX_DAILY_LOG = 100
 def webhook_handler():
     if request.method == "POST":
         # retrieve the message in JSON and then transform it to Telegram object
-        update = telegram.Update.de_json(request.get_json(force=True))
+        update = telegram.Update.de_json(request.get_json(force=True), bot)
 
         chat_id = update.message.chat.id
         text = update.message.text.encode('utf-8')
@@ -153,6 +153,7 @@ Legend for bus timings:
 *Seats Available*
 Standing Available
 _Limited Standing_
+(Second Visit)
 '''
 
 def initDbList(key):
@@ -223,7 +224,7 @@ def editFav(chat_id, text):
         if len(matchingIndexes) == 0:
             addToDbList(favKey, action)
             reply_markup = telegram.ReplyKeyboardHide()
-            bot.sendMessage(chat_id=chat_id, text="Command saved to your favourites!", reply_markup=reply_markup)
+            sendMsg(chat_id, "Command saved to your favourites!", reply_markup=reply_markup)
         else:
             sendMsg(chat_id, 'You have already saved this command')
     elif command == 'delete':
@@ -233,7 +234,7 @@ def editFav(chat_id, text):
             for i in matchingIndexes:
                 popFromDbList(favKey, i)
             reply_markup = telegram.ReplyKeyboardHide()
-            bot.sendMessage(chat_id=chat_id, text="Command removed from your favourites!", reply_markup=reply_markup)
+            sendMsg(chat_id, "Command removed from your favourites!", reply_markup=reply_markup)
     else:
         sendMsg(chat_id, helpText)
 
@@ -245,7 +246,7 @@ def showFav(chat_id):
         sendMsg(chat_id, "You have no favourite commands")
     else:
         reply_markup = telegram.ReplyKeyboardMarkup(keyboard=[[item] for item in currFavs], resize_keyboard=True, one_time_keyboard=True)
-        bot.sendMessage(chat_id=chat_id, text="Here are your favourite commands:", reply_markup=reply_markup)
+        sendMsg(chat_id, "Here are your favourite commands:", reply_markup=reply_markup)
 
 def saveHistory(chat_id, text):
     textAction = re.sub('\n.*', '', text)
@@ -265,7 +266,7 @@ def showHist(chat_id):
         sendMsg(chat_id, "You have no recent commands")
     else:
         reply_markup = telegram.ReplyKeyboardMarkup(keyboard=[[item] for item in history], resize_keyboard=True, one_time_keyboard=True)
-        bot.sendMessage(chat_id=chat_id, text="Here are your recent commands:", reply_markup=reply_markup)
+        sendMsg(chat_id, "Here are your recent commands:", reply_markup=reply_markup)
 
 def replyBusInfo(chat_id, text):
     textAction = re.sub('\n.*', '', text)
@@ -554,8 +555,11 @@ def replyNextBus(chat_id, text, count, fromQ):
     if shouldSendMsg and reply:
         sendMsg(chat_id, reply)
         
-def sendMsg(chat_id, text):
-    bot.sendMessage(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN)
+def sendMsg(chat_id, text, reply_markup=None):
+    try:
+        bot.sendMessage(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=reply_markup)
+    except telegram.error.TelegramError:
+        bot.sendMessage(chat_id=chat_id, text="Reply is in invalid format")
   
 @app.route('/'+TOKEN+'/set_webhook', methods=['GET', 'POST'])
 def set_webhook():
@@ -593,7 +597,7 @@ def getRemainingTime(timey):
     	diffMins = 0
     return int(diffMins)
 
-def formatTiming(timey, load):
+def formatTiming(timey, load, visit):
 	remTime = getRemainingTime(timey)
 	if remTime == 0:
 		remTime = 'Arr'
@@ -601,6 +605,8 @@ def formatTiming(timey, load):
 		remTime = ''
 	else:
 		remTime = str(remTime)
+	if visit == '2':
+		remTime = '('+remTime+')'
 	presuffix = ''
 	if load == 'Seats Available':
 		presuffix = '*'
@@ -632,9 +638,10 @@ def getNextBuses(busStopNo, routeNo):
 	        	if timey is None:
 	        		continue
 	        	load = service[bus]['Load']
-	        	timingList.append((timey, load))
+	        	visit = service[bus]['VisitNumber']
+	        	timingList.append((timey, load, visit))
 
-        successText = 'Arriving in: '+' '.join([formatTiming(timey, load) for (timey, load) in timingList])+'\n(Next buses for route '+routeNo+' at stop '+busStopNo+')'
+        successText = 'Arriving in: '+' '.join([formatTiming(timey, load, visit) for (timey, load, visit) in timingList])+'\n(Next buses for route '+routeNo+' at stop '+busStopNo+')'
 
         return (1, successText, getRemainingTime(timingList[0][0]))
     else:
