@@ -17,6 +17,7 @@ import re
 import json
 import redis
 import shelve
+import logging
 
 app = Flask(__name__)
 app.config.from_pyfile('flaskapp.cfg')
@@ -557,9 +558,12 @@ def replyNextBus(chat_id, text, count, fromQ):
         
 def sendMsg(chat_id, text, reply_markup=None):
     try:
-        bot.sendMessage(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=reply_markup)
-    except telegram.error.TelegramError:
-        bot.sendMessage(chat_id=chat_id, text="Reply is in invalid format")
+        try:
+            bot.sendMessage(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=reply_markup)
+        except telegram.error.TelegramError:
+            bot.sendMessage(chat_id=chat_id, text="Reply is in invalid format")
+    except Exception:
+        logging.exception("Couldn't send message to {}".format(chat_id))
   
 @app.route('/'+TOKEN+'/set_webhook', methods=['GET', 'POST'])
 def set_webhook():
