@@ -7,7 +7,7 @@ import telegram
 from flask import Flask, request
 
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from pytz import timezone
 from dateutil import parser
 localTz = timezone('Singapore')
@@ -22,19 +22,19 @@ import logging
 app = Flask(__name__)
 app.config.from_pyfile('flaskapp.cfg')
 
-TOKEN = app.config['TOKEN']
+TOKEN = app.config['BOT_TOKEN']
 APP_URL = app.config['APP_URL']
 LTA_ACCOUNT_KEY = app.config['LTA_ACCOUNT_KEY']
 LTA_USER_ID = app.config['LTA_USER_ID']
 
-REDISCLOUD_URL = app.config['REDISCLOUD_URL']
-REDISCLOUD_PORT = app.config['REDISCLOUD_PORT']
-REDISCLOUD_PASSWORD = app.config['REDISCLOUD_PASSWORD']
+REDIS_URL = app.config['REDIS_URL']
+REDIS_PORT = app.config['REDIS_PORT']
+REDIS_PASSWORD = app.config['REDIS_PASSWORD']
 
 global bot
 bot = telegram.Bot(token=TOKEN)
 
-db = redis.StrictRedis(host=REDISCLOUD_URL, port=REDISCLOUD_PORT, password=REDISCLOUD_PASSWORD, db=0)
+db = redis.StrictRedis(host=REDIS_URL, port=REDIS_PORT, password=REDIS_PASSWORD, db=0)
 
 KEY_FAV = '_fav'
 KEY_HIST = '_hist'
@@ -284,12 +284,17 @@ def replyBusInfo(chat_id, text):
         return
     shelf = shelve.open('routeset.shelve')
     infoKey = str(busStopNo+'_'+routeNo+'_1') #shelf can't handle unicode
+    infoKey2 = str(busStopNo+'_'+routeNo+'_2')
+    routeDict = None
     if infoKey in shelf:
         routeDict = shelf[infoKey]
+    elif infoKey2 in shelf:
+        routeDict = shelf[infoKey2]
+    if routeDict:
         info = 'First and last bus timings for route '+routeNo+' at stop '+busStopNo
-        info += '\nWeekdays: '+routeDict['SR_FST_WD']+' - '+routeDict['SR_LST_WD']
-        info += '\nSaturday: '+routeDict['SR_FST_SAT']+' - '+routeDict['SR_LST_SAT']
-        info += '\nSunday: '+routeDict['SR_FST_SUN']+' - '+routeDict['SR_LST_SUN']
+        info += '\nWeekdays: '+routeDict['WD_FirstBus']+' - '+routeDict['WD_LastBus']
+        info += '\nSaturday: '+routeDict['SAT_FirstBus']+' - '+routeDict['SAT_LastBus']
+        info += '\nSunday: '+routeDict['SUN_FirstBus']+' - '+routeDict['SUN_LastBus']
         sendMsg(chat_id, info)
         serviceKey = str(chat_id) + KEY_SERVICE
         saveDbObj(serviceKey, (busStopNo, routeNo))
@@ -348,13 +353,8 @@ def getDailyLog(chat_id):
     dailyLogKey = str(chat_id) + KEY_DAILY_LOG
     dailyLog = db.get(dailyLogKey)
     if dailyLog is None:
-        db.set(dailyLogKey, 0)
         dailyLog = 0
     return int(dailyLog)
-
-def setDailyLog(chat_id, newVal):
-    dailyLogKey = str(chat_id) + KEY_DAILY_LOG
-    db.set(dailyLogKey, newVal)
 
 def replyDailyLog(chat_id):
     dailyLog = getDailyLog(chat_id)
@@ -365,9 +365,17 @@ def hasExceededDailyLimit(chat_id):
     if (dailyLog >= MAX_DAILY_LOG):
         sendMsg(chat_id, 'You have reached your daily limit for next bus queries')
         return True
-    dailyLog += 1
-    setDailyLog(chat_id, dailyLog)
+    dailyLogKey = str(chat_id) + KEY_DAILY_LOG
+    db.incr(dailyLogKey, 1)
+    db.expireat(dailyLogKey, getDailyLimitExpiryDate())
     return False
+
+def getDailyLimitExpiryDate():
+    now = datetime.utcnow()
+    then = datetime(now.year, now.month, now.day, 19) # 3am sgt
+    if then <= now:
+        then += timedelta(days=1)
+    return then
 
 def replyNextBus(chat_id, text, count, fromQ):
     if (fromQ):
@@ -492,7 +500,7 @@ def replyNextBus(chat_id, text, count, fromQ):
         saveHistory(chat_id, text)
 
     if hasExceededDailyLimit(chat_id):
-    	return
+        return
 
     response = getNextBuses(busStopNo, routeNo)
     waitSecs = -1
@@ -598,58 +606,55 @@ def getRemainingTime(timey):
     diffDelta = timey-getNow()
     diffMins = math.floor(diffDelta.total_seconds()/60)
     if diffMins < 0:
-    	diffMins = 0
+        diffMins = 0
     return int(diffMins)
 
 def formatTiming(timey, load, visit):
-	remTime = getRemainingTime(timey)
-	if remTime == 0:
-		remTime = 'Arr'
-	elif remTime == -1:
-		remTime = ''
-	else:
-		remTime = str(remTime)
-	if visit == '2':
-		remTime = '('+remTime+')'
-	presuffix = ''
-	if load == 'Seats Available':
-		presuffix = '*'
-	elif load == 'Standing Available':
-		presuffix = ''
-	elif load == 'Limited Standing':
-		presuffix = '_'
-	return presuffix + remTime + presuffix
+    remTime = getRemainingTime(timey)
+    if remTime == 0:
+        remTime = 'Arr'
+    elif remTime == -1:
+        remTime = ''
+    else:
+        remTime = str(remTime)
+    if visit == '2':
+        remTime = '('+remTime+')'
+    presuffix = ''
+    if load == 'SEA': #Seats Available
+        presuffix = '*'
+    elif load == 'SDA': #Standing Available
+        presuffix = ''
+    elif load == 'LSD': #Limited Standing
+        presuffix = '_'
+    return presuffix + remTime + presuffix
 
 def getNextBuses(busStopNo, routeNo):
-    url = 'http://datamall2.mytransport.sg/ltaodataservice/BusArrival'
-    headers = {'accept': 'application/json', 'AccountKey': LTA_ACCOUNT_KEY, 'UniqueUserID': LTA_USER_ID}
-    payload = {'BusStopID': busStopNo, 'ServiceNo': routeNo, 'SST': 'True'}
+    url = 'http://datamall2.mytransport.sg/ltaodataservice/BusArrivalv2'
+    headers = {'accept': 'application/json', 'AccountKey': LTA_ACCOUNT_KEY}
+    payload = {'BusStopCode': busStopNo, 'ServiceNo': routeNo}
     r = requests.get(url, params=payload, headers=headers)
     rjson = r.json()
 
-    services = rjson['Services']
+    services = rjson.get('Services', [])
     if len(services) > 0:
         service = services[0]
 
-        if service['Status'] == "Not In Operation":
-            return (0, 'The service for route '+routeNo+' at stop '+busStopNo+' is currently not in operation')
-
-        busList = ['NextBus', 'SubsequentBus', 'SubsequentBus3']
+        busList = ['NextBus', 'NextBus2', 'NextBus3']
         timingList = []
         for bus in busList:
-	        if bus in service:
-	        	timey = parseTime(service[bus]['EstimatedArrival'])
-	        	if timey is None:
-	        		continue
-	        	load = service[bus]['Load']
-	        	visit = service[bus]['VisitNumber']
-	        	timingList.append((timey, load, visit))
+            if bus in service:
+                timey = parseTime(service[bus]['EstimatedArrival'])
+                if timey is None:
+                    continue
+                load = service[bus]['Load']
+                visit = service[bus]['VisitNumber']
+                timingList.append((timey, load, visit))
 
         successText = 'Arriving in: '+' '.join([formatTiming(timey, load, visit) for (timey, load, visit) in timingList])+'\n(Next buses for route '+routeNo+' at stop '+busStopNo+')'
 
         return (1, successText, getRemainingTime(timingList[0][0]))
     else:
-        return (-1, 'No services found for route '+routeNo+' at stop '+busStopNo)
+        return (-1, 'No currently operating services found for route '+routeNo+' at stop '+busStopNo)
 
 def checkQueueUponStart():
     for key in db.scan_iter("*"+KEY_QUEUE):
