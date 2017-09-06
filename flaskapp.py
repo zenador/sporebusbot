@@ -3,21 +3,23 @@
 import sys
 import os
 sys.path.append(os.path.join(os.path.abspath('.'), 'lib'))
-import telegram
-from flask import Flask, request
 
-import requests
 from datetime import datetime, timedelta
 from pytz import timezone
 from dateutil import parser
 localTz = timezone('Singapore')
 from threading import Timer
-import math
+from math import floor, sqrt, sin, cos, atan2, radians
+from operator import itemgetter
 import re
 import json
 import redis
 import shelve
 import logging
+
+import telegram
+from flask import Flask, request
+import requests
 
 app = Flask(__name__)
 app.config.from_pyfile('flaskapp.cfg')
@@ -56,8 +58,12 @@ def webhook_handler():
 
         chat_id = update.message.chat.id
         text = update.message.text.encode('utf-8')
+        loc = update.message.location
         
-        replyCommand(chat_id, text)
+        if loc:
+            replyLocation(chat_id, loc)
+        else:
+            replyCommand(chat_id, text)
 
     return 'ok'
 
@@ -85,6 +91,8 @@ def replyCommand(chat_id, text):
 helpText = 'Please enter /help to read about the available commands'
 
 helpTextFull = '''
+Send your location to see the 5 nearest bus stops.
+
 /next - Shows the ETAs for the next few buses
 */next [Bus Stop #] [Bus Route #]*
 _/next 17179 184_
@@ -103,9 +111,11 @@ As an alternative, replace 'track' with 'tracks' to not receive the alerts in th
 */nag [Bus Stop #] [Bus Route #] [X Integer] [Y Integer]*
 _/nag 17179 184 2 1_
 
-/info - Shows the first and last bus timings for that service
+/info - Shows the first and last bus timings for that route at that bus stop, or info about the stop if route is omitted
 */info [Bus Stop #] [Bus Route #]*
 _/info 17179 184_
+*/info [Bus Stop #]*
+_/info 17179_
 
 For all commands, you may omit the bus stop number and route number to use your last successfully queried numbers instead, e.g.
 /next
@@ -274,14 +284,29 @@ def replyBusInfo(chat_id, text):
     textList = [item.strip() for item in textAction.split(' ')]
     if len(textList) == 3:
         command, busStopNo, routeNo = textList
+        processBusInfo(chat_id, busStopNo, routeNo)
+    elif len(textList) == 2:
+        command, busStopNo = textList
+        processBusStop(chat_id, busStopNo)
     elif len(textList) == 1:
-        command = textList[0]
+        # command = textList[0]
         success, busStopNo, routeNo = getSavedService(chat_id)
-        if success == False:
-            return
+        if success:
+            processBusInfo(chat_id, busStopNo, routeNo)
     else:
         sendMsg(chat_id, helpText)
-        return
+
+def processBusStop(chat_id, busStopNo):
+    shelf = shelve.open('stopsetplus.shelve')
+    a = shelf.get(busStopNo)
+    if a:
+        msg = "_{}_ @ {} (*{}*)\n{}".format(a["Description"], a["RoadName"], a["BusStopCode"], ", ".join(a["Services"]))
+        sendLoc(chat_id, a["Latitude"], a["Longitude"])
+    else:
+        msg = "Could not find bus stop with code {}".format(busStopNo)
+    sendMsg(chat_id, msg)
+
+def processBusInfo(chat_id, busStopNo, routeNo):
     shelf = shelve.open('routeset.shelve')
     infoKey = str(busStopNo+'_'+routeNo+'_1') #shelf can't handle unicode
     infoKey2 = str(busStopNo+'_'+routeNo+'_2')
@@ -567,11 +592,17 @@ def replyNextBus(chat_id, text, count, fromQ):
 def sendMsg(chat_id, text, reply_markup=None):
     try:
         try:
-            bot.sendMessage(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=reply_markup)
+            bot.send_message(chat_id=chat_id, text=text, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=reply_markup)
         except telegram.error.TelegramError:
-            bot.sendMessage(chat_id=chat_id, text="Reply is in invalid format")
+            bot.send_message(chat_id=chat_id, text="Reply is in invalid format")
     except Exception:
         logging.exception("Couldn't send message to {}".format(chat_id))
+        
+def sendLoc(chat_id, lat, lon):
+    try:
+        bot.send_location(chat_id=chat_id, latitude=lat, longitude=lon)
+    except Exception:
+        logging.exception("Couldn't send location to {}".format(chat_id))
   
 @app.route('/'+TOKEN+'/set_webhook', methods=['GET', 'POST'])
 def set_webhook():
@@ -604,7 +635,7 @@ def getRemainingTime(timey):
     if timey == None:
         return -1
     diffDelta = timey-getNow()
-    diffMins = math.floor(diffDelta.total_seconds()/60)
+    diffMins = floor(diffDelta.total_seconds()/60)
     if diffMins < 0:
         diffMins = 0
     return int(diffMins)
@@ -655,6 +686,38 @@ def getNextBuses(busStopNo, routeNo):
         return (1, successText, getRemainingTime(timingList[0][0]))
     else:
         return (-1, 'No currently operating services found for route '+routeNo+' at stop '+busStopNo)
+'''
+def getSquaredDistance(lat1, long1, lat2, long2):
+    return (lat1 - lat2)**2 + (long1 - long2)**2
+'''
+def getHaversineDistance(lat1, long1, lat2, long2):
+    R = 6373.0 # approximate radius of earth in km
+
+    lat1 = radians(lat1)
+    long1 = radians(long1)
+    lat2 = radians(lat2)
+    long2 = radians(long2)
+
+    dlon = long2 - long1
+    dlat = lat2 - lat1
+
+    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    distance = R * c
+    return distance
+
+def replyLocation(chat_id, loc):
+    # not the fastest method, but the dataset is quite small so this is fast enough for now
+    shelf = shelve.open('stopsetplus.shelve')
+    nearbyList = []
+    for key, val in shelf.iteritems():
+        dist = getHaversineDistance(loc.latitude, loc.longitude, val["Latitude"], val["Longitude"])
+        nearbyList.append((val, dist))
+    nearbyList = sorted(nearbyList, key=itemgetter(1))[:5]
+    nearbyList = ["_{}_ @ {} (*{}*), {:.2f} km\n{}".format(a["Description"], a["RoadName"], a["BusStopCode"], b, ", ".join(a["Services"])) for a,b in nearbyList]
+    msg = "\n\n".join(nearbyList)
+    sendMsg(chat_id, msg)
 
 def checkQueueUponStart():
     for key in db.scan_iter("*"+KEY_QUEUE):
