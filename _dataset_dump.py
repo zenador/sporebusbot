@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import json
 import shelve
 import re
@@ -9,7 +11,7 @@ import requests
 LTA_ACCOUNT_KEY = 'YOUR LTA ACCOUNT KEY'
 
 def saveAsJson(thing, filename):
-	with open(filename+".json","w") as thefile:
+	with open(filename+".json","w", encoding="utf-8") as thefile:
 		json.dump(thing, thefile, sort_keys=True, indent=4, ensure_ascii=False)
 
 def loadFromJson(filename):
@@ -26,7 +28,7 @@ def saveDictAsShelve(dicty, filename):
 def loadShelveAsDict(filename):
 	shelf = shelve.open(filename+'.shelve')
 	dicty = {}
-	for key, val in shelf.iteritems():
+	for key, val in shelf.items():
 		dicty[key] = val
 	return dicty
 
@@ -67,7 +69,7 @@ def downloadData(name):
 
 		skippy += 50
 		results = len(dictList)
-		print results, skippy
+		print(results, skippy)
 
 	return jsonDict
 
@@ -82,11 +84,11 @@ def funnysort(listy):
 
 def combineDicts(routes, stops):
 	setDict = defaultdict(list)
-	for key, val in routes.iteritems():
+	for key, val in routes.items():
 		setDict[val["BusStopCode"]].append(val["ServiceNo"])
-	for key, val in setDict.iteritems():
+	for key, val in setDict.items():
 		setDict[key] = funnysort(list(set(val)))
-	for key, val in stops.iteritems():
+	for key, val in stops.items():
 		val["Services"] = setDict[key]
 	return stops
 

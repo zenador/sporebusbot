@@ -1,0 +1,8 @@
+{
+	"builds": [{ 
+		"src": "flaskapp.py", "use": "@now/python"
+	}],
+	"routes": [
+		{ "src": "/(.*)", "dest": "flaskapp.py" }
+	]
+}
