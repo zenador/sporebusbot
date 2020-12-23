@@ -115,27 +115,27 @@ def showHist(chat_id):
 def checkStar(chat_id, busStopNo):
 	starKey = makeStarKey(chat_id)
 	initDbList(starKey)
-	matchingIndexes = [i for (i, val) in enumerate(getDbObj(starKey)) if val==busStopNo]
+	matchingIndexes = [i for (i, val) in enumerate(getDbObj(starKey)) if val.split("\n")[0]==busStopNo]
 	return matchingIndexes
 
-def makeStarButton(busStopNo):
-	return ("Star", serialise({"c": "star", "s": busStopNo}))
+def makeStarButton(busStopNo, busStopName):
+	return ("Star", serialise({"c": "star", "s": busStopNo, "n": busStopName[:30]}))
 
-def makeUnstarButton(busStopNo):
-	return ("Unstar", serialise({"c": "unstar", "s": busStopNo}))
+def makeUnstarButton(busStopNo, busStopName):
+	return ("Unstar", serialise({"c": "unstar", "s": busStopNo, "n": busStopName[:30]}))
 
-def editStar(message, busStopNo, command):
+def editStar(message, busStopNo, command, busStopName):
 	chat_id = message.chat.id
 	matchingIndexes = checkStar(chat_id, busStopNo)
 	starKey = makeStarKey(chat_id)
 	if command == 'star':
 		if len(matchingIndexes) == 0:
-			addToDbList(starKey, busStopNo)
-		newButton = makeUnstarButton(busStopNo)
+			addToDbList(starKey, busStopNo+'\n'+busStopName)
+		newButton = makeUnstarButton(busStopNo, busStopName)
 	elif command == 'unstar':
 		for i in matchingIndexes:
 			popFromDbList(starKey, i)
-		newButton = makeStarButton(busStopNo)
+		newButton = makeStarButton(busStopNo, busStopName)
 	reply_markup = replaceButtonInMarkup(message.reply_markup, newButton, col=-2)
 	editMsgReplyMarkup(message, reply_markup=reply_markup)
 

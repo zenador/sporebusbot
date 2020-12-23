@@ -38,7 +38,7 @@ def webhookHandler():
 			if command == "constr":
 				callbackConstr(message, data)
 			elif command in ["star", "unstar"]:
-				editStar(message, data.get("s"), command)
+				editStar(message, data.get("s"), command, data.get("n"))
 			elif command == "loc":
 				sendBusStopLoc(message, data.get("s"))
 			elif command == "hide":

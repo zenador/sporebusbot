@@ -101,10 +101,11 @@ def makeRoutesInlineKeyboardInner(busStopNo, a, chat_id):
 	makeData = lambda x: serialise({"c": "constr", "s": busStopNo, "r": x})
 	routeButtons = [(a, makeData(a)) for a in a["Services"]]
 	stopButtons = [("Map", serialise({"c": "loc", "s": busStopNo}))]
+	busStopName = a.get("Description", "")
 	if len(checkStar(chat_id, busStopNo)) == 0:
-		stopButtons.append(makeStarButton(busStopNo))
+		stopButtons.append(makeStarButton(busStopNo, busStopName))
 	else:
-		stopButtons.append(makeUnstarButton(busStopNo))
+		stopButtons.append(makeUnstarButton(busStopNo, busStopName))
 	stopButtons.append(("Close", serialise({"c": "hide"})))
 	layout = makeInlineKeyboardLayout(routeButtons, cols=6) + makeInlineKeyboardLayout(stopButtons, rows=1)
 	return telegram.InlineKeyboardMarkup(inline_keyboard=layout)
